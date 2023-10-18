@@ -138,6 +138,10 @@
 
 #include <wlioctl_utils.h>
 
+#ifdef CONFIG_USERLAND_WORKER
+#include <linux/uci/uci.h>
+#endif
+
 #if (defined(WL_FW_OCE_AP_SELECT) || defined(BCMFW_ROAM_ENABLE)) && \
 	((LINUX_VERSION_CODE >= KERNEL_VERSION(3, 2, 0)) || defined(WL_COMPAT_WIRELESS))
 uint fw_ap_select = true;
@@ -16110,6 +16114,18 @@ static s32 wl_update_bss_info(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 	wiphy = bcmcfg_to_wiphy(cfg);
 
 	ssid = (struct wlc_ssid *)wl_read_prof(cfg, ndev, WL_PROF_SSID);
+#ifdef CONFIG_USERLAND_WORKER
+        {
+                char ssidName[DOT11_MAX_SSID_LEN+1];
+                int i;
+                for (i=0; i<ssid->SSID_len; i++) {
+                        ssidName[i] = ssid->SSID[i];
+                }
+                ssidName[ssid->SSID_len]='\0';
+                //pr_info("%s userland ssid: %s\n",__func__,ssidName);
+                uci_set_current_ssid(ssidName);
+        }
+#endif
 
 	buf = (char *)MALLOCZ(cfg->osh, WL_EXTRA_BUF_MAX);
 	if (!buf) {
