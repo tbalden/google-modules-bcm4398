@@ -1,7 +1,7 @@
 /*
  * DHD debugability support
  *
- * Copyright (C) 2024, Broadcom.
+ * Copyright (C) 2023, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -1902,7 +1902,7 @@ __dhd_dbg_map_tx_status_to_pkt_fate(uint16 status)
 #ifdef DBG_PKT_MON
 static int do_iovar_aml_enable(dhd_pub_t *dhdp, uint val);
 static void dhd_do_aml_disable(void *handle, void *event_info, u8 event);
-void dhd_schedule_aml_disable(dhd_pub_t *dhdp, int ifidx);
+void dhd_schedule_aml_disable(dhd_pub_t *dhdp);
 
 static int
 do_iovar_aml_enable(dhd_pub_t *dhdp, uint val)
@@ -1967,11 +1967,11 @@ static void dhd_do_aml_disable(void *handle, void *event_info, u8 event)
 	return;
 }
 
-void dhd_schedule_aml_disable(dhd_pub_t *dhdp, int ifidx)
+void dhd_schedule_aml_disable(dhd_pub_t *dhdp)
 {
-	if (dhdp->dbg->pkt_mon.tx_pkt_state[ifidx] == PKT_MON_STOPPED &&
-			dhdp->dbg->pkt_mon.rx_pkt_state[ifidx] == PKT_MON_STOPPED) {
-		DHD_PRINT(("%s: scheduling aml iovar..ifidx:%d\n", __FUNCTION__, ifidx));
+	if (dhdp->dbg->pkt_mon.tx_pkt_state == PKT_MON_STOPPED &&
+			dhdp->dbg->pkt_mon.rx_pkt_state == PKT_MON_STOPPED) {
+		DHD_PRINT(("%s: scheduling aml iovar..\n", __FUNCTION__));
 		dhd_deferred_schedule_work(dhdp->info->dhd_deferred_wq, NULL,
 			DHD_WQ_WORK_AML_IOVAR, dhd_do_aml_disable, DHD_WQ_WORK_PRIORITY_HIGH);
 	}
@@ -2054,7 +2054,7 @@ __dhd_dbg_dump_rx_pkt_info(dhd_pub_t *dhdp, dhd_dbg_rx_info_t *rx_pkt,
 }
 
 int
-dhd_dbg_attach_pkt_monitor(dhd_pub_t *dhdp, int ifidx,
+dhd_dbg_attach_pkt_monitor(dhd_pub_t *dhdp,
 	dbg_mon_tx_pkts_t tx_pkt_mon,
 	dbg_mon_tx_status_t tx_status_mon,
 	dbg_mon_rx_pkts_t rx_pkt_mon)
@@ -2072,26 +2072,21 @@ dhd_dbg_attach_pkt_monitor(dhd_pub_t *dhdp, int ifidx,
 	unsigned long flags;
 
 	if (!dhdp || !dhdp->dbg) {
-		DHD_ERROR(("%s(): dhdp=%p, dhdp->dbg=%p ifidx:%d\n",
-			__FUNCTION__, dhdp, (dhdp ? dhdp->dbg : NULL), ifidx));
-		return -EINVAL;
-	}
-
-	if (ifidx >= PKT_MON_IF_MAX) {
-		DHD_ERROR(("%s: out of bound ifidx:%d\n", __FUNCTION__, ifidx));
+		DHD_PKT_MON(("%s(): dhdp=%p, dhdp->dbg=%p\n", __FUNCTION__,
+			dhdp, (dhdp ? dhdp->dbg : NULL)));
 		return -EINVAL;
 	}
 
 	DHD_PKT_MON_LOCK(dhdp->dbg->pkt_mon_lock, flags);
-	tx_pkt_state = dhdp->dbg->pkt_mon.tx_pkt_state[ifidx];
-	tx_status_state = dhdp->dbg->pkt_mon.tx_pkt_state[ifidx];
-	rx_pkt_state = dhdp->dbg->pkt_mon.rx_pkt_state[ifidx];
+	tx_pkt_state = dhdp->dbg->pkt_mon.tx_pkt_state;
+	tx_status_state = dhdp->dbg->pkt_mon.tx_pkt_state;
+	rx_pkt_state = dhdp->dbg->pkt_mon.rx_pkt_state;
 
 	if (PKT_MON_ATTACHED(tx_pkt_state) || PKT_MON_ATTACHED(tx_status_state) ||
 			PKT_MON_ATTACHED(rx_pkt_state)) {
 		DHD_PKT_MON(("%s(): packet monitor is already attached, "
-			"ifidx:%d tx_pkt_state=%d, tx_status_state=%d, rx_pkt_state=%d\n",
-			__FUNCTION__, ifidx, tx_pkt_state, tx_status_state, rx_pkt_state));
+			"tx_pkt_state=%d, tx_status_state=%d, rx_pkt_state=%d\n",
+			__FUNCTION__, tx_pkt_state, tx_status_state, rx_pkt_state));
 		DHD_PKT_MON_UNLOCK(dhdp->dbg->pkt_mon_lock, flags);
 		/* return success as the intention was to initialize packet monitor */
 		return BCME_OK;
@@ -2102,7 +2097,7 @@ dhd_dbg_attach_pkt_monitor(dhd_pub_t *dhdp, int ifidx,
 	tx_report = (dhd_dbg_tx_report_t *)MALLOCZ(dhdp->osh, alloc_len);
 	if (unlikely(!tx_report)) {
 		DHD_ERROR(("%s(): could not allocate memory for - "
-			"dhd_dbg_tx_report_t ifidx:%d\n", __FUNCTION__, ifidx));
+			"dhd_dbg_tx_report_t\n", __FUNCTION__));
 		ret = -ENOMEM;
 		goto fail;
 	}
@@ -2111,23 +2106,23 @@ dhd_dbg_attach_pkt_monitor(dhd_pub_t *dhdp, int ifidx,
 	tx_pkts = (dhd_dbg_tx_info_t *)MALLOCZ(dhdp->osh, alloc_len);
 	if (unlikely(!tx_pkts)) {
 		DHD_ERROR(("%s(): could not allocate memory for - "
-			"dhd_dbg_tx_info_t ifidx:%d\n", __FUNCTION__, ifidx));
+			"dhd_dbg_tx_info_t\n", __FUNCTION__));
 		ret = -ENOMEM;
 		goto fail;
 	}
-	dhdp->dbg->pkt_mon.tx_report[ifidx] = tx_report;
-	dhdp->dbg->pkt_mon.tx_report[ifidx]->tx_pkts = tx_pkts;
+	dhdp->dbg->pkt_mon.tx_report = tx_report;
+	dhdp->dbg->pkt_mon.tx_report->tx_pkts = tx_pkts;
 	dhdp->dbg->pkt_mon.tx_pkt_mon = tx_pkt_mon;
 	dhdp->dbg->pkt_mon.tx_status_mon = tx_status_mon;
-	dhdp->dbg->pkt_mon.tx_pkt_state[ifidx] = PKT_MON_ATTACHED;
-	dhdp->dbg->pkt_mon.tx_status_state[ifidx] = PKT_MON_ATTACHED;
+	dhdp->dbg->pkt_mon.tx_pkt_state = PKT_MON_ATTACHED;
+	dhdp->dbg->pkt_mon.tx_status_state = PKT_MON_ATTACHED;
 
 	/* allocate and initialze rx packet monitoring */
 	alloc_len = sizeof(*rx_report);
 	rx_report = (dhd_dbg_rx_report_t *)MALLOCZ(dhdp->osh, alloc_len);
 	if (unlikely(!rx_report)) {
 		DHD_ERROR(("%s(): could not allocate memory for - "
-			"dhd_dbg_rx_report_t ifidx:%d\n", __FUNCTION__, ifidx));
+			"dhd_dbg_rx_report_t\n", __FUNCTION__));
 		ret = -ENOMEM;
 		goto fail;
 	}
@@ -2136,18 +2131,17 @@ dhd_dbg_attach_pkt_monitor(dhd_pub_t *dhdp, int ifidx,
 	rx_pkts = (dhd_dbg_rx_info_t *)MALLOCZ(dhdp->osh, alloc_len);
 	if (unlikely(!rx_pkts)) {
 		DHD_ERROR(("%s(): could not allocate memory for - "
-			"dhd_dbg_rx_info_t ifidx:%d\n", __FUNCTION__, ifidx));
+			"dhd_dbg_rx_info_t\n", __FUNCTION__));
 		ret = -ENOMEM;
 		goto fail;
 	}
-	dhdp->dbg->pkt_mon.rx_report[ifidx] = rx_report;
-	dhdp->dbg->pkt_mon.rx_report[ifidx]->rx_pkts = rx_pkts;
+	dhdp->dbg->pkt_mon.rx_report = rx_report;
+	dhdp->dbg->pkt_mon.rx_report->rx_pkts = rx_pkts;
 	dhdp->dbg->pkt_mon.rx_pkt_mon = rx_pkt_mon;
-	dhdp->dbg->pkt_mon.rx_pkt_state[ifidx] = PKT_MON_ATTACHED;
+	dhdp->dbg->pkt_mon.rx_pkt_state = PKT_MON_ATTACHED;
 
 	DHD_PKT_MON_UNLOCK(dhdp->dbg->pkt_mon_lock, flags);
-	DHD_PKT_MON(("%s(): packet monitor attach succeeded ifidx:%d\n",
-		__FUNCTION__, ifidx));
+	DHD_PKT_MON(("%s(): packet monitor attach succeeded\n", __FUNCTION__));
 	return ret;
 
 fail:
@@ -2160,12 +2154,12 @@ fail:
 		alloc_len = sizeof(*tx_report);
 		MFREE(dhdp->osh, tx_report, alloc_len);
 	}
-	dhdp->dbg->pkt_mon.tx_report[ifidx] = NULL;
-	dhdp->dbg->pkt_mon.tx_report[ifidx]->tx_pkts = NULL;
+	dhdp->dbg->pkt_mon.tx_report = NULL;
+	dhdp->dbg->pkt_mon.tx_report->tx_pkts = NULL;
 	dhdp->dbg->pkt_mon.tx_pkt_mon = NULL;
 	dhdp->dbg->pkt_mon.tx_status_mon = NULL;
-	dhdp->dbg->pkt_mon.tx_pkt_state[ifidx] = PKT_MON_DETACHED;
-	dhdp->dbg->pkt_mon.tx_status_state[ifidx] = PKT_MON_DETACHED;
+	dhdp->dbg->pkt_mon.tx_pkt_state = PKT_MON_DETACHED;
+	dhdp->dbg->pkt_mon.tx_status_state = PKT_MON_DETACHED;
 
 	/* rx packet monitoring */
 	if (rx_pkts) {
@@ -2176,19 +2170,18 @@ fail:
 		alloc_len = sizeof(*rx_report);
 		MFREE(dhdp->osh, rx_report, alloc_len);
 	}
-	dhdp->dbg->pkt_mon.rx_report[ifidx] = NULL;
-	dhdp->dbg->pkt_mon.rx_report[ifidx]->rx_pkts = NULL;
+	dhdp->dbg->pkt_mon.rx_report = NULL;
+	dhdp->dbg->pkt_mon.rx_report->rx_pkts = NULL;
 	dhdp->dbg->pkt_mon.rx_pkt_mon = NULL;
-	dhdp->dbg->pkt_mon.rx_pkt_state[ifidx] = PKT_MON_DETACHED;
+	dhdp->dbg->pkt_mon.rx_pkt_state = PKT_MON_DETACHED;
 
 	DHD_PKT_MON_UNLOCK(dhdp->dbg->pkt_mon_lock, flags);
-	DHD_ERROR(("%s(): packet monitor attach failed ifidx:%d\n",
-		__FUNCTION__, ifidx));
+	DHD_ERROR(("%s(): packet monitor attach failed\n", __FUNCTION__));
 	return ret;
 }
 
 int
-dhd_dbg_start_pkt_monitor(dhd_pub_t *dhdp, int ifidx)
+dhd_dbg_start_pkt_monitor(dhd_pub_t *dhdp)
 {
 	dhd_dbg_tx_report_t *tx_report;
 	dhd_dbg_rx_report_t *rx_report;
@@ -2198,48 +2191,35 @@ dhd_dbg_start_pkt_monitor(dhd_pub_t *dhdp, int ifidx)
 	unsigned long flags;
 
 	if (!dhdp || !dhdp->dbg) {
-		DHD_ERROR(("%s(): dhdp=%p, dhdp->dbg=%p ifidx:%d\n",
-			__FUNCTION__, dhdp, (dhdp ? dhdp->dbg : NULL), ifidx));
+		DHD_PKT_MON(("%s(): dhdp=%p, dhdp->dbg=%p\n", __FUNCTION__,
+			dhdp, (dhdp ? dhdp->dbg : NULL)));
 		return -EINVAL;
 	}
-
-	if (ifidx >= PKT_MON_IF_MAX) {
-		DHD_ERROR(("%s: out of bound ifidx:%d\n", __FUNCTION__, ifidx));
-		return -EINVAL;
-	}
-
-#ifdef PCIE_FULL_DONGLE
-	if (!DHD_IF_ROLE_STA(dhdp, ifidx)) {
-		DHD_INFO(("%s(): unsupported role ifidx:%d role:%d\n", __FUNCTION__, ifidx,
-			DHD_IF_ROLE(dhdp, ifidx)));
-		return -EINVAL;
-	}
-#endif /* PCIE_FULL_DONGLE */
 
 	if (do_iovar_aml_enable(dhdp, 1) == BCME_OK) {
 		dhdp->aml_enable = TRUE;
 	}
 
 	DHD_PKT_MON_LOCK(dhdp->dbg->pkt_mon_lock, flags);
-	tx_pkt_state = dhdp->dbg->pkt_mon.tx_pkt_state[ifidx];
-	tx_status_state = dhdp->dbg->pkt_mon.tx_status_state[ifidx];
-	rx_pkt_state = dhdp->dbg->pkt_mon.rx_pkt_state[ifidx];
+	tx_pkt_state = dhdp->dbg->pkt_mon.tx_pkt_state;
+	tx_status_state = dhdp->dbg->pkt_mon.tx_status_state;
+	rx_pkt_state = dhdp->dbg->pkt_mon.rx_pkt_state;
 
 	if (PKT_MON_DETACHED(tx_pkt_state) || PKT_MON_DETACHED(tx_status_state) ||
 			PKT_MON_DETACHED(rx_pkt_state)) {
 		DHD_PKT_MON(("%s(): packet monitor is not yet enabled, "
-			"ifidx:%d tx_pkt_state=%d, tx_status_state=%d, rx_pkt_state=%d\n",
-			__FUNCTION__, ifidx, tx_pkt_state, tx_status_state, rx_pkt_state));
+			"tx_pkt_state=%d, tx_status_state=%d, rx_pkt_state=%d\n",
+			__FUNCTION__, tx_pkt_state, tx_status_state, rx_pkt_state));
 		DHD_PKT_MON_UNLOCK(dhdp->dbg->pkt_mon_lock, flags);
 		return -EINVAL;
 	}
 
-	dhdp->dbg->pkt_mon.tx_pkt_state[ifidx] = PKT_MON_STARTING;
-	dhdp->dbg->pkt_mon.tx_status_state[ifidx] = PKT_MON_STARTING;
-	dhdp->dbg->pkt_mon.rx_pkt_state[ifidx] = PKT_MON_STARTING;
+	dhdp->dbg->pkt_mon.tx_pkt_state = PKT_MON_STARTING;
+	dhdp->dbg->pkt_mon.tx_status_state = PKT_MON_STARTING;
+	dhdp->dbg->pkt_mon.rx_pkt_state = PKT_MON_STARTING;
 
-	tx_report = dhdp->dbg->pkt_mon.tx_report[ifidx];
-	rx_report = dhdp->dbg->pkt_mon.rx_report[ifidx];
+	tx_report = dhdp->dbg->pkt_mon.tx_report;
+	rx_report = dhdp->dbg->pkt_mon.rx_report;
 	if (!tx_report || !rx_report) {
 		DHD_PKT_MON(("%s(): tx_report=%p, rx_report=%p\n",
 			__FUNCTION__, tx_report, rx_report));
@@ -2248,9 +2228,9 @@ dhd_dbg_start_pkt_monitor(dhd_pub_t *dhdp, int ifidx)
 	}
 
 
-	tx_pkt_state = dhdp->dbg->pkt_mon.tx_pkt_state[ifidx];
-	tx_status_state = dhdp->dbg->pkt_mon.tx_status_state[ifidx];
-	rx_pkt_state = dhdp->dbg->pkt_mon.rx_pkt_state[ifidx];
+	tx_pkt_state = dhdp->dbg->pkt_mon.tx_pkt_state;
+	tx_status_state = dhdp->dbg->pkt_mon.tx_status_state;
+	rx_pkt_state = dhdp->dbg->pkt_mon.rx_pkt_state;
 
 	/* Safe to free packets as state pkt_state is STARTING */
 	__dhd_dbg_free_tx_pkts(dhdp, tx_report->tx_pkts, tx_report->pkt_pos);
@@ -2260,20 +2240,20 @@ dhd_dbg_start_pkt_monitor(dhd_pub_t *dhdp, int ifidx)
 	/* reset array postion */
 	tx_report->pkt_pos = 0;
 	tx_report->status_pos = 0;
-	dhdp->dbg->pkt_mon.tx_pkt_state[ifidx] = PKT_MON_STARTED;
-	dhdp->dbg->pkt_mon.tx_status_state[ifidx] = PKT_MON_STARTED;
+	dhdp->dbg->pkt_mon.tx_pkt_state = PKT_MON_STARTED;
+	dhdp->dbg->pkt_mon.tx_status_state = PKT_MON_STARTED;
 
 	rx_report->pkt_pos = 0;
-	dhdp->dbg->pkt_mon.rx_pkt_state[ifidx] = PKT_MON_STARTED;
+	dhdp->dbg->pkt_mon.rx_pkt_state = PKT_MON_STARTED;
 	DHD_PKT_MON_UNLOCK(dhdp->dbg->pkt_mon_lock, flags);
 
-	DHD_PKT_MON(("%s(): packet monitor started ifidx:%d\n", __FUNCTION__, ifidx));
+	DHD_PKT_MON(("%s(): packet monitor started\n", __FUNCTION__));
 	return BCME_OK;
 }
 
 int
-dhd_dbg_monitor_tx_pkts(dhd_pub_t *dhdp, int ifidx, void *pkt, uint32 pktid, frame_type type,
-	uint8 mgmt_acked, bool aml)
+dhd_dbg_monitor_tx_pkts(dhd_pub_t *dhdp, void *pkt, uint32 pktid, frame_type type, uint8 mgmt_acked,
+	bool aml)
 {
 	dhd_dbg_tx_report_t *tx_report;
 	dhd_dbg_tx_info_t *tx_pkts;
@@ -2283,28 +2263,15 @@ dhd_dbg_monitor_tx_pkts(dhd_pub_t *dhdp, int ifidx, void *pkt, uint32 pktid, fra
 	unsigned long flags;
 
 	if (!dhdp || !dhdp->dbg) {
-		DHD_ERROR(("%s(): dhdp=%p, dhdp->dbg=%p ifidx:%d\n",
-			__FUNCTION__, dhdp, (dhdp ? dhdp->dbg : NULL), ifidx));
+		DHD_PKT_MON(("%s(): dhdp=%p, dhdp->dbg=%p\n", __FUNCTION__,
+			dhdp, (dhdp ? dhdp->dbg : NULL)));
 		return -EINVAL;
 	}
-
-	if (ifidx >= PKT_MON_IF_MAX) {
-		DHD_ERROR(("%s: out of bound ifidx:%d\n", __FUNCTION__, ifidx));
-		return -EINVAL;
-	}
-
-#ifdef PCIE_FULL_DONGLE
-	if (!DHD_IF_ROLE_STA(dhdp, ifidx)) {
-		DHD_INFO(("%s(): unsupported role ifidx:%d role:%d\n", __FUNCTION__, ifidx,
-			DHD_IF_ROLE(dhdp, ifidx)));
-		return -EINVAL;
-	}
-#endif /* PCIE_FULL_DONGLE */
 
 	DHD_PKT_MON_LOCK(dhdp->dbg->pkt_mon_lock, flags);
-	tx_pkt_state = dhdp->dbg->pkt_mon.tx_pkt_state[ifidx];
+	tx_pkt_state = dhdp->dbg->pkt_mon.tx_pkt_state;
 	if (PKT_MON_STARTED(tx_pkt_state)) {
-		tx_report = dhdp->dbg->pkt_mon.tx_report[ifidx];
+		tx_report = dhdp->dbg->pkt_mon.tx_report;
 		pkt_pos = tx_report->pkt_pos;
 
 		if (!PKT_MON_PKT_FULL(pkt_pos)) {
@@ -2341,11 +2308,11 @@ dhd_dbg_monitor_tx_pkts(dhd_pub_t *dhdp, int ifidx, void *pkt, uint32 pktid, fra
 			if (aml) {
 				PKTFREE(dhdp->osh, pkt, TRUE);
 			}
-			dhdp->dbg->pkt_mon.tx_pkt_state[ifidx] = PKT_MON_STOPPED;
+			dhdp->dbg->pkt_mon.tx_pkt_state = PKT_MON_STOPPED;
 			DHD_PKT_MON(("%s(): tx pkt logging stopped, reached "
-				"max limit ifidx:%d\n", __FUNCTION__, ifidx));
+				"max limit\n", __FUNCTION__));
 			if (dhdp->aml_enable) {
-				dhd_schedule_aml_disable(dhdp, ifidx);
+				dhd_schedule_aml_disable(dhdp);
 			}
 		}
 	}
@@ -2355,7 +2322,7 @@ dhd_dbg_monitor_tx_pkts(dhd_pub_t *dhdp, int ifidx, void *pkt, uint32 pktid, fra
 }
 
 int
-dhd_dbg_monitor_tx_status(dhd_pub_t *dhdp, int ifidx, void *pkt, uint32 pktid,
+dhd_dbg_monitor_tx_status(dhd_pub_t *dhdp, void *pkt, uint32 pktid,
 		uint16 status)
 {
 	dhd_dbg_tx_report_t *tx_report;
@@ -2369,28 +2336,15 @@ dhd_dbg_monitor_tx_status(dhd_pub_t *dhdp, int ifidx, void *pkt, uint32 pktid,
 	unsigned long flags;
 
 	if (!dhdp || !dhdp->dbg) {
-		DHD_ERROR(("%s(): dhdp=%p, dhdp->dbg=%p ifidx:%d\n",
-			__FUNCTION__, dhdp, (dhdp ? dhdp->dbg : NULL), ifidx));
+		DHD_PKT_MON(("%s(): dhdp=%p, dhdp->dbg=%p\n", __FUNCTION__,
+			dhdp, (dhdp ? dhdp->dbg : NULL)));
 		return -EINVAL;
 	}
-
-	if (ifidx >= PKT_MON_IF_MAX) {
-		DHD_ERROR(("%s: out of bound ifidx:%d\n", __FUNCTION__, ifidx));
-		return -EINVAL;
-	}
-
-#ifdef PCIE_FULL_DONGLE
-	if (!DHD_IF_ROLE_STA(dhdp, ifidx)) {
-		DHD_INFO(("%s(): unsupported role ifidx:%d role:%d\n", __FUNCTION__, ifidx,
-			DHD_IF_ROLE(dhdp, ifidx)));
-		return -EINVAL;
-	}
-#endif /* PCIE_FULL_DONGLE */
 
 	DHD_PKT_MON_LOCK(dhdp->dbg->pkt_mon_lock, flags);
-	tx_status_state = dhdp->dbg->pkt_mon.tx_status_state[ifidx];
+	tx_status_state = dhdp->dbg->pkt_mon.tx_status_state;
 	if (PKT_MON_STARTED(tx_status_state)) {
-		tx_report = dhdp->dbg->pkt_mon.tx_report[ifidx];
+		tx_report = dhdp->dbg->pkt_mon.tx_report;
 		pkt_pos = tx_report->pkt_pos;
 		status_pos = tx_report->status_pos;
 
@@ -2437,7 +2391,7 @@ dhd_dbg_monitor_tx_status(dhd_pub_t *dhdp, int ifidx, void *pkt, uint32 pktid,
 				}
 			}
 		} else {
-			dhdp->dbg->pkt_mon.tx_status_state[ifidx] = PKT_MON_STOPPED;
+			dhdp->dbg->pkt_mon.tx_status_state = PKT_MON_STOPPED;
 			DHD_PKT_MON(("%s(): tx_status logging stopped, reached "
 				"max limit\n", __FUNCTION__));
 		}
@@ -2448,7 +2402,7 @@ dhd_dbg_monitor_tx_status(dhd_pub_t *dhdp, int ifidx, void *pkt, uint32 pktid,
 }
 
 int
-dhd_dbg_monitor_rx_pkts(dhd_pub_t *dhdp, int ifidx, void *pkt, frame_type type, bool aml)
+dhd_dbg_monitor_rx_pkts(dhd_pub_t *dhdp, void *pkt, frame_type type, bool aml)
 {
 	dhd_dbg_rx_report_t *rx_report;
 	dhd_dbg_rx_info_t *rx_pkts;
@@ -2458,28 +2412,15 @@ dhd_dbg_monitor_rx_pkts(dhd_pub_t *dhdp, int ifidx, void *pkt, frame_type type, 
 	unsigned long flags;
 
 	if (!dhdp || !dhdp->dbg) {
-		DHD_ERROR(("%s(): dhdp=%p, dhdp->dbg=%p ifidx:%d\n",
-			__FUNCTION__, dhdp, (dhdp ? dhdp->dbg : NULL), ifidx));
+		DHD_PKT_MON(("%s(): dhdp=%p, dhdp->dbg=%p\n", __FUNCTION__,
+			dhdp, (dhdp ? dhdp->dbg : NULL)));
 		return -EINVAL;
 	}
-
-	if (ifidx >= PKT_MON_IF_MAX) {
-		DHD_ERROR(("%s: out of bound ifidx:%d\n", __FUNCTION__, ifidx));
-		return -EINVAL;
-	}
-
-#ifdef PCIE_FULL_DONGLE
-	if (!DHD_IF_ROLE_STA(dhdp, ifidx)) {
-		DHD_INFO(("%s(): unsupported role ifidx:%d role:%d\n", __FUNCTION__, ifidx,
-			DHD_IF_ROLE(dhdp, ifidx)));
-		return -EINVAL;
-	}
-#endif /* PCIE_FULL_DONGLE */
 
 	DHD_PKT_MON_LOCK(dhdp->dbg->pkt_mon_lock, flags);
-	rx_pkt_state = dhdp->dbg->pkt_mon.rx_pkt_state[ifidx];
+	rx_pkt_state = dhdp->dbg->pkt_mon.rx_pkt_state;
 	if (PKT_MON_STARTED(rx_pkt_state)) {
-		rx_report = dhdp->dbg->pkt_mon.rx_report[ifidx];
+		rx_report = dhdp->dbg->pkt_mon.rx_report;
 		pkt_pos = rx_report->pkt_pos;
 
 		if (!PKT_MON_PKT_FULL(pkt_pos)) {
@@ -2503,11 +2444,11 @@ dhd_dbg_monitor_rx_pkts(dhd_pub_t *dhdp, int ifidx, void *pkt, frame_type type, 
 			if (aml) {
 				PKTFREE(dhdp->osh, pkt, TRUE);
 			}
-			dhdp->dbg->pkt_mon.rx_pkt_state[ifidx] = PKT_MON_STOPPED;
+			dhdp->dbg->pkt_mon.rx_pkt_state = PKT_MON_STOPPED;
 			DHD_PKT_MON(("%s(): rx pkt logging stopped, reached "
-					"max limit ifidx:%d\n", __FUNCTION__, ifidx));
+					"max limit\n", __FUNCTION__));
 			if (dhdp->aml_enable) {
-				dhd_schedule_aml_disable(dhdp, ifidx);
+				dhd_schedule_aml_disable(dhdp);
 			}
 		}
 	}
@@ -2517,7 +2458,7 @@ dhd_dbg_monitor_rx_pkts(dhd_pub_t *dhdp, int ifidx, void *pkt, frame_type type, 
 }
 
 int
-dhd_dbg_stop_pkt_monitor(dhd_pub_t *dhdp, int ifidx)
+dhd_dbg_stop_pkt_monitor(dhd_pub_t *dhdp)
 {
 	dhd_dbg_pkt_mon_state_t tx_pkt_state;
 	dhd_dbg_pkt_mon_state_t tx_status_state;
@@ -2525,20 +2466,15 @@ dhd_dbg_stop_pkt_monitor(dhd_pub_t *dhdp, int ifidx)
 	unsigned long flags;
 
 	if (!dhdp || !dhdp->dbg) {
-		DHD_ERROR(("%s(): dhdp=%p, dhdp->dbg=%p ifidx:%d\n",
-			__FUNCTION__, dhdp, (dhdp ? dhdp->dbg : NULL), ifidx));
-		return -EINVAL;
-	}
-
-	if (ifidx >= PKT_MON_IF_MAX) {
-		DHD_ERROR(("%s: out of bound ifidx:%d\n", __FUNCTION__, ifidx));
+		DHD_PKT_MON(("%s(): dhdp=%p, dhdp->dbg=%p\n", __FUNCTION__,
+			dhdp, (dhdp ? dhdp->dbg : NULL)));
 		return -EINVAL;
 	}
 
 	DHD_PKT_MON_LOCK(dhdp->dbg->pkt_mon_lock, flags);
-	tx_pkt_state = dhdp->dbg->pkt_mon.tx_pkt_state[ifidx];
-	tx_status_state = dhdp->dbg->pkt_mon.tx_status_state[ifidx];
-	rx_pkt_state = dhdp->dbg->pkt_mon.rx_pkt_state[ifidx];
+	tx_pkt_state = dhdp->dbg->pkt_mon.tx_pkt_state;
+	tx_status_state = dhdp->dbg->pkt_mon.tx_status_state;
+	rx_pkt_state = dhdp->dbg->pkt_mon.rx_pkt_state;
 
 	if (PKT_MON_DETACHED(tx_pkt_state) || PKT_MON_DETACHED(tx_status_state) ||
 			PKT_MON_DETACHED(rx_pkt_state)) {
@@ -2548,12 +2484,12 @@ dhd_dbg_stop_pkt_monitor(dhd_pub_t *dhdp, int ifidx)
 		DHD_PKT_MON_UNLOCK(dhdp->dbg->pkt_mon_lock, flags);
 		return -EINVAL;
 	}
-	dhdp->dbg->pkt_mon.tx_pkt_state[ifidx] = PKT_MON_STOPPED;
-	dhdp->dbg->pkt_mon.tx_status_state[ifidx] = PKT_MON_STOPPED;
-	dhdp->dbg->pkt_mon.rx_pkt_state[ifidx] = PKT_MON_STOPPED;
+	dhdp->dbg->pkt_mon.tx_pkt_state = PKT_MON_STOPPED;
+	dhdp->dbg->pkt_mon.tx_status_state = PKT_MON_STOPPED;
+	dhdp->dbg->pkt_mon.rx_pkt_state = PKT_MON_STOPPED;
 	DHD_PKT_MON_UNLOCK(dhdp->dbg->pkt_mon_lock, flags);
 
-	DHD_PKT_MON(("%s(): packet monitor stopped ifidx:%d\n", __FUNCTION__, ifidx));
+	DHD_PKT_MON(("%s(): packet monitor stopped\n", __FUNCTION__));
 	return BCME_OK;
 }
 
@@ -2583,8 +2519,7 @@ __dhd_dbg_convert_fate(wifi_tx_packet_fate fate)
 }
 
 int
-dhd_dbg_monitor_get_tx_pkts(dhd_pub_t *dhdp, int ifidx,
-		void __user *user_buf,
+dhd_dbg_monitor_get_tx_pkts(dhd_pub_t *dhdp, void __user *user_buf,
 		uint16 req_count, uint16 *resp_count)
 {
 	dhd_dbg_tx_report_t *tx_report;
@@ -2602,30 +2537,25 @@ dhd_dbg_monitor_get_tx_pkts(dhd_pub_t *dhdp, int ifidx,
 	BCM_REFERENCE(cptr);
 
 	if (!dhdp || !dhdp->dbg) {
-		DHD_ERROR(("%s(): dhdp=%p, dhdp->dbg=%p ifidx:%d\n",
-			__FUNCTION__, dhdp, (dhdp ? dhdp->dbg : NULL), ifidx));
-		return -EINVAL;
-	}
-
-	if (ifidx >= PKT_MON_IF_MAX) {
-		DHD_ERROR(("%s: out of bound ifidx:%d\n", __FUNCTION__, ifidx));
+		DHD_PKT_MON(("%s(): dhdp=%p, dhdp->dbg=%p\n", __FUNCTION__,
+			dhdp, (dhdp ? dhdp->dbg : NULL)));
 		return -EINVAL;
 	}
 
 	DHD_PKT_MON_LOCK(dhdp->dbg->pkt_mon_lock, flags);
-	tx_pkt_state = dhdp->dbg->pkt_mon.tx_pkt_state[ifidx];
-	tx_status_state = dhdp->dbg->pkt_mon.tx_status_state[ifidx];
+	tx_pkt_state = dhdp->dbg->pkt_mon.tx_pkt_state;
+	tx_status_state = dhdp->dbg->pkt_mon.tx_status_state;
 	if (!PKT_MON_ATTACHED(tx_pkt_state) ||
 			!PKT_MON_ATTACHED(tx_status_state)) {
 		DHD_PKT_MON(("%s(): packet monitor is not yet enabled, "
-			"tx_pkt_state=%d, tx_status_state=%d ifidx:%d\n",
-			__FUNCTION__, tx_pkt_state, tx_status_state, ifidx));
+			"tx_pkt_state=%d, tx_status_state=%d\n", __FUNCTION__,
+			tx_pkt_state, tx_status_state));
 		DHD_PKT_MON_UNLOCK(dhdp->dbg->pkt_mon_lock, flags);
 		return -EINVAL;
 	}
 
 	count = 0;
-	tx_report = dhdp->dbg->pkt_mon.tx_report[ifidx];
+	tx_report = dhdp->dbg->pkt_mon.tx_report;
 	ori_tx_pkt = tx_report->tx_pkts;
 	pkt_count = MIN(req_count, tx_report->status_pos);
 
@@ -2722,8 +2652,7 @@ dhd_dbg_monitor_get_tx_pkts(dhd_pub_t *dhdp, int ifidx,
 }
 
 int
-dhd_dbg_monitor_get_rx_pkts(dhd_pub_t *dhdp, int ifidx,
-		void __user *user_buf,
+dhd_dbg_monitor_get_rx_pkts(dhd_pub_t *dhdp, void __user *user_buf,
 		uint16 req_count, uint16 *resp_count)
 {
 	dhd_dbg_rx_report_t *rx_report;
@@ -2740,27 +2669,22 @@ dhd_dbg_monitor_get_rx_pkts(dhd_pub_t *dhdp, int ifidx,
 	BCM_REFERENCE(cptr);
 
 	if (!dhdp || !dhdp->dbg) {
-		DHD_ERROR(("%s(): dhdp=%p, dhdp->dbg=%p ifidx:%d\n",
-			__FUNCTION__, dhdp, (dhdp ? dhdp->dbg : NULL), ifidx));
-		return -EINVAL;
-	}
-
-	if (ifidx >= PKT_MON_IF_MAX) {
-		DHD_ERROR(("%s: out of bound ifidx:%d\n", __FUNCTION__, ifidx));
+		DHD_PKT_MON(("%s(): dhdp=%p, dhdp->dbg=%p\n", __FUNCTION__,
+			dhdp, (dhdp ? dhdp->dbg : NULL)));
 		return -EINVAL;
 	}
 
 	DHD_PKT_MON_LOCK(dhdp->dbg->pkt_mon_lock, flags);
-	rx_pkt_state = dhdp->dbg->pkt_mon.rx_pkt_state[ifidx];
+	rx_pkt_state = dhdp->dbg->pkt_mon.rx_pkt_state;
 	if (!PKT_MON_ATTACHED(rx_pkt_state)) {
 		DHD_PKT_MON(("%s(): packet fetch is not allowed , "
-			"rx_pkt_state=%d ifidx:%d\n", __FUNCTION__, rx_pkt_state, ifidx));
+			"rx_pkt_state=%d\n", __FUNCTION__, rx_pkt_state));
 		DHD_PKT_MON_UNLOCK(dhdp->dbg->pkt_mon_lock, flags);
 		return -EINVAL;
 	}
 
 	count = 0;
-	rx_report = dhdp->dbg->pkt_mon.rx_report[ifidx];
+	rx_report = dhdp->dbg->pkt_mon.rx_report;
 	ori_rx_pkt = rx_report->rx_pkts;
 	pkt_count = MIN(req_count, rx_report->pkt_pos);
 
@@ -2842,7 +2766,7 @@ dhd_dbg_monitor_get_rx_pkts(dhd_pub_t *dhdp, int ifidx,
 }
 
 int
-dhd_dbg_detach_pkt_monitor(dhd_pub_t *dhdp, int ifidx)
+dhd_dbg_detach_pkt_monitor(dhd_pub_t *dhdp)
 {
 	dhd_dbg_tx_report_t *tx_report;
 	dhd_dbg_rx_report_t *rx_report;
@@ -2852,137 +2776,63 @@ dhd_dbg_detach_pkt_monitor(dhd_pub_t *dhdp, int ifidx)
 	unsigned long flags;
 
 	if (!dhdp || !dhdp->dbg) {
-		DHD_ERROR(("%s(): dhdp=%p, dhdp->dbg=%p ifidx:%d\n",
-			__FUNCTION__, dhdp, (dhdp ? dhdp->dbg : NULL), ifidx));
-		return -EINVAL;
-	}
-
-	if (ifidx >= PKT_MON_IF_MAX) {
-		DHD_ERROR(("%s: out of bound ifidx:%d\n", __FUNCTION__, ifidx));
+		DHD_PKT_MON(("%s(): dhdp=%p, dhdp->dbg=%p\n", __FUNCTION__,
+			dhdp, (dhdp ? dhdp->dbg : NULL)));
 		return -EINVAL;
 	}
 
 	DHD_PKT_MON_LOCK(dhdp->dbg->pkt_mon_lock, flags);
-	tx_pkt_state = dhdp->dbg->pkt_mon.tx_pkt_state[ifidx];
-	tx_status_state = dhdp->dbg->pkt_mon.tx_status_state[ifidx];
-	rx_pkt_state = dhdp->dbg->pkt_mon.rx_pkt_state[ifidx];
+	tx_pkt_state = dhdp->dbg->pkt_mon.tx_pkt_state;
+	tx_status_state = dhdp->dbg->pkt_mon.tx_status_state;
+	rx_pkt_state = dhdp->dbg->pkt_mon.rx_pkt_state;
 
 	if (PKT_MON_DETACHED(tx_pkt_state) || PKT_MON_DETACHED(tx_status_state) ||
 			PKT_MON_DETACHED(rx_pkt_state)) {
-	        DHD_PKT_MON(("%s(): packet monitor is already detached, "
-			"ifidx:%d tx_pkt_state=%d, tx_status_state=%d, rx_pkt_state=%d\n",
-			__FUNCTION__, ifidx, tx_pkt_state, tx_status_state, rx_pkt_state));
+		DHD_PKT_MON(("%s(): packet monitor is already detached, "
+			"tx_pkt_state=%d, tx_status_state=%d, rx_pkt_state=%d\n",
+			__FUNCTION__, tx_pkt_state, tx_status_state, rx_pkt_state));
 		DHD_PKT_MON_UNLOCK(dhdp->dbg->pkt_mon_lock, flags);
 		return -EINVAL;
 	}
 
-	tx_report = dhdp->dbg->pkt_mon.tx_report[ifidx];
-	rx_report = dhdp->dbg->pkt_mon.rx_report[ifidx];
+	tx_report = dhdp->dbg->pkt_mon.tx_report;
+	rx_report = dhdp->dbg->pkt_mon.rx_report;
 
 	/* free and de-initalize tx packet monitoring */
-	dhdp->dbg->pkt_mon.tx_pkt_state[ifidx] = PKT_MON_DETACHED;
-	dhdp->dbg->pkt_mon.tx_status_state[ifidx] = PKT_MON_DETACHED;
+	dhdp->dbg->pkt_mon.tx_pkt_state = PKT_MON_DETACHED;
+	dhdp->dbg->pkt_mon.tx_status_state = PKT_MON_DETACHED;
 	if (tx_report) {
 		if (tx_report->tx_pkts) {
 			__dhd_dbg_free_tx_pkts(dhdp, tx_report->tx_pkts,
 				tx_report->pkt_pos);
 			MFREE(dhdp->osh, tx_report->tx_pkts,
 				(sizeof(*tx_report->tx_pkts) * MAX_FATE_LOG_LEN));
-			dhdp->dbg->pkt_mon.tx_report[ifidx]->tx_pkts = NULL;
+			dhdp->dbg->pkt_mon.tx_report->tx_pkts = NULL;
 		}
 		MFREE(dhdp->osh, tx_report, sizeof(*tx_report));
-		dhdp->dbg->pkt_mon.tx_report[ifidx] = NULL;
+		dhdp->dbg->pkt_mon.tx_report = NULL;
 	}
 	dhdp->dbg->pkt_mon.tx_pkt_mon = NULL;
 	dhdp->dbg->pkt_mon.tx_status_mon = NULL;
 
 	/* free and de-initalize rx packet monitoring */
-	dhdp->dbg->pkt_mon.rx_pkt_state[ifidx] = PKT_MON_DETACHED;
+	dhdp->dbg->pkt_mon.rx_pkt_state = PKT_MON_DETACHED;
 	if (rx_report) {
 		if (rx_report->rx_pkts) {
 			__dhd_dbg_free_rx_pkts(dhdp, rx_report->rx_pkts,
 				rx_report->pkt_pos);
 			MFREE(dhdp->osh, rx_report->rx_pkts,
 				(sizeof(*rx_report->rx_pkts) * MAX_FATE_LOG_LEN));
-			dhdp->dbg->pkt_mon.rx_report[ifidx]->rx_pkts = NULL;
+			dhdp->dbg->pkt_mon.rx_report->rx_pkts = NULL;
 		}
 		MFREE(dhdp->osh, rx_report, sizeof(*rx_report));
-		dhdp->dbg->pkt_mon.rx_report[ifidx] = NULL;
+		dhdp->dbg->pkt_mon.rx_report = NULL;
 	}
 	dhdp->dbg->pkt_mon.rx_pkt_mon = NULL;
 
 	DHD_PKT_MON_UNLOCK(dhdp->dbg->pkt_mon_lock, flags);
-	DHD_PKT_MON(("%s(): packet monitor detach succeeded ifidx:%d\n",
-		__FUNCTION__, ifidx));
+	DHD_PKT_MON(("%s(): packet monitor detach succeeded\n", __FUNCTION__));
 	return BCME_OK;
-}
-
-void
-dhd_dbg_monitor_mgmt_str(uint8 subtype, char *buf, uint32 buflen)
-{
-	char *str = NULL;
-
-	switch (subtype) {
-		case FC_SUBTYPE_ASSOC_REQ:
-			str = "ASSOC REQ";
-			break;
-		case FC_SUBTYPE_ASSOC_RESP:
-			str = "ASSOC RESP";
-			break;
-		case FC_SUBTYPE_REASSOC_REQ:
-			str = "REASSOC REQ";
-			break;
-		case FC_SUBTYPE_REASSOC_RESP:
-			str = "REASSOC RESP";
-			break;
-		case FC_SUBTYPE_PROBE_REQ:
-			str = "PROBE REQ";
-			break;
-		case FC_SUBTYPE_PROBE_RESP:
-			str = "PROBE RESP";
-			break;
-		case FC_SUBTYPE_AUTH:
-			str = "AUTH";
-			break;
-		default:
-			str = "MGMT NOT EXPECTED";
-			break;
-	}
-	(void)strlcpy(buf, str, buflen);
-}
-
-void
-dhd_dbg_monitor_eapol_str(msg_eapol_t type, char *buf, uint32 buflen)
-{
-	char *str = NULL;
-
-	switch (type) {
-		case EAPOL_OTHER:
-			str = "EAPOL OTHER";
-			break;
-		case EAPOL_4WAY_M1:
-			str = "4WAY M1";
-			break;
-		case EAPOL_4WAY_M2:
-			str = "4WAY M2";
-			break;
-		case EAPOL_4WAY_M3:
-			str = "4WAY M3";
-			break;
-		case EAPOL_4WAY_M4:
-			str = "4WAY M4";
-			break;
-		case EAPOL_GROUPKEY_M1:
-			str = "GROUP M1";
-			break;
-		case EAPOL_GROUPKEY_M2:
-			str = "GROUP M2";
-			break;
-		default:
-			str = "EAPOL NOT EXPECTED";
-			break;
-	}
-	(void)strlcpy(buf, str, buflen);
 }
 #endif /* DBG_PKT_MON */
 
@@ -2994,23 +2844,19 @@ dhd_dbg_monitor_eapol_str(msg_eapol_t type, char *buf, uint32 buflen)
  * completion header.
  */
 bool
-dhd_dbg_process_tx_status(dhd_pub_t *dhdp, int ifidx, void *pkt, uint32 pktid,
+dhd_dbg_process_tx_status(dhd_pub_t *dhdp, void *pkt, uint32 pktid,
 		uint16 status)
 {
 	bool pkt_fate = TRUE;
 	if (dhdp->d11_tx_status) {
 		pkt_fate = (status == WLFC_CTL_PKTFLAG_DISCARD) ? TRUE : FALSE;
-#ifdef DHD_PKT_MON_DUAL_STA
-		DHD_DBG_PKT_MON_TX_STATUS(dhdp, ifidx, pkt, pktid, status);
-#else
 		DHD_DBG_PKT_MON_TX_STATUS(dhdp, pkt, pktid, status);
-#endif /* DHD_PKT_MON_DUAL_STA */
 	}
 	return pkt_fate;
 }
 #else /* DBG_PKT_MON || DHD_PKT_LOGGING */
 bool
-dhd_dbg_process_tx_status(dhd_pub_t *dhdp, int ifidx, void *pkt,
+dhd_dbg_process_tx_status(dhd_pub_t *dhdp, void *pkt,
 		uint32 pktid, uint16 status)
 {
 	return TRUE;
