@@ -12483,10 +12483,13 @@ dhd_fillup_ioct_reqst(dhd_pub_t *dhd, uint16 len, uint cmd, void* buf, int ifidx
 	rqstlen = len;
 	resplen = len;
 
-	/* Limit ioct request to MSGBUF_MAX_MSG_SIZE bytes including hdrs */
-	/* 8K allocation of dongle buffer fails */
-	/* dhd doesnt give separate input & output buf lens */
-	/* so making the assumption that input length can never be more than 2k */
+	/* fail 'set' ioctl request if len > MSGBUF_MAX_MSG_SIZE bytes including hdrs */
+	if ((action & WL_IOCTL_ACTION_SET) && (rqstlen > MSGBUF_IOCTL_MAX_RQSTLEN)) {
+		DHD_ERROR(("%s: rqstlen(%u) larger than %u\n", __FUNCTION__, rqstlen,
+			MSGBUF_IOCTL_MAX_RQSTLEN));
+		return BCME_BADLEN;
+	}
+
 	rqstlen = MIN(rqstlen, MSGBUF_IOCTL_MAX_RQSTLEN);
 
 #ifdef PCIE_INB_DW
