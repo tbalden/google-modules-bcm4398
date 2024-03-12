@@ -5552,6 +5552,11 @@ wbrc2wl_wlan_on_request(void *dhd_pub)
 	}
 #endif /* WBRC_TEST */
 
+	if (dhd_get_reboot_status(dhdp) >= 0 || dhd_get_module_exit_status(dhdp) > 0) {
+		DHD_PRINT(("%s: reboot or exit in progress\n", __FUNCTION__));
+		return BCME_BUSY;
+	}
+
 	dhd_net_if_lock(dev);
 	if (!g_wifi_on) {
 		dhd_net_wifi_platform_set_power(dev, TRUE, WIFI_TURNON_DELAY);
@@ -16329,3 +16334,77 @@ wl_cfg80211_get_bss_sta_info(struct bcm_cfg80211 *cfg, struct net_device *dev,
 	MFREE(cfg->osh, buf, buf_len);
 }
 #endif /* WL_BSS_STA_INFO */
+
+s32
+wl_android_set_blacklist_bssid(struct net_device *dev, maclist_t *blacklist,
+    uint32 len, uint32 flush)
+{
+	s32 err;
+	s32 macmode;
+
+	if (blacklist) {
+		err = wldev_ioctl_set(dev, WLC_SET_MACLIST, (u8 *)blacklist, len);
+		if (err != BCME_OK) {
+			WL_ERR(("WLC_SET_MACLIST failed %d\n", err));
+			return err;
+		}
+	}
+	/* By default programming blacklist flushes out old values */
+	macmode = (flush && !blacklist) ? WLC_MACMODE_DISABLED : WLC_MACMODE_DENY;
+	err = wldev_ioctl_set(dev, WLC_SET_MACMODE, (u8 *)&macmode, sizeof(macmode));
+	if (err != BCME_OK) {
+		WL_ERR(("WLC_SET_MACMODE %d failed %d\n", macmode, err));
+	} else {
+		WL_INFORM_MEM(("WLC_SET_MACMODE %d applied\n", macmode));
+	}
+	return err;
+}
+
+s32
+wl_android_set_whitelist_ssid(struct net_device *dev, wl_ssid_whitelist_t *ssid_whitelist,
+    uint32 len, uint32 flush)
+{
+	s32 err;
+	u8 *buf;
+	u32 buf_len = WLC_IOCTL_MEDLEN;
+	wl_ssid_whitelist_t whitelist_ssid_flush;
+	struct bcm_cfg80211 *cfg = wl_get_cfg(dev);
+
+	if (!ssid_whitelist) {
+		if (flush) {
+			ssid_whitelist = &whitelist_ssid_flush;
+			ssid_whitelist->ssid_count = 0;
+		} else {
+			WL_ERR(("%s : Nothing to do here\n", __FUNCTION__));
+			return BCME_BADARG;
+		}
+	}
+
+	buf = (char *)MALLOC(cfg->osh, buf_len);
+	if (buf == NULL) {
+		WL_ERR(("failed to allocated memory %d bytes\n",
+			WLC_IOCTL_MEDLEN));
+		return -ENOMEM;
+	}
+
+	if ((len + strlen("roam_exp_ssid_whitelist")) >= buf_len) {
+		WL_ERR(("unexpected len for ssid blklist:%d\n", len));
+		err = -EINVAL;
+		goto exit;
+	}
+
+	ssid_whitelist->version = SSID_WHITELIST_VERSION_1;
+	ssid_whitelist->flags = flush ? ROAM_EXP_CLEAR_SSID_WHITELIST : 0;
+	err = wldev_iovar_setbuf(dev, "roam_exp_ssid_whitelist",
+			(u8 *)ssid_whitelist, len, buf, buf_len, NULL);
+	if (err != BCME_OK) {
+		if (err == BCME_UNSUPPORTED) {
+			WL_ERR(("roam_exp_bssid_pref, UNSUPPORTED \n"));
+		} else {
+			WL_ERR(("Failed to execute roam_exp_bssid_pref %d\n", err));
+		}
+	}
+exit:
+	MFREE(cfg->osh, buf, buf_len);
+	return err;
+}
