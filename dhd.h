@@ -1652,6 +1652,7 @@ typedef struct dhd_pub {
 #ifdef DHD_COREDUMP
 	uint8 *coredump_mem;
 	uint32 coredump_len;
+	uint32 uc_status;		/* PCIE Uncorrectable Error Status */
 	uint8 ewp_init_state;
 	char memdump_str[DHD_MEMDUMP_LONGSTR_LEN];
 #endif /* DHD_COREDUMP */
