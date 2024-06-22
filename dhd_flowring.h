@@ -6,7 +6,7 @@
  * Provides type definitions and function prototypes used to create, delete and manage flow rings at
  * high level.
  *
- * Copyright (C) 2023, Broadcom.
+ * Copyright (C) 2024, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -134,6 +134,9 @@
 	(DHD_IF_ROLE_AP(pub, idx) || DHD_IF_ROLE_P2PGO(pub, idx) ||\
 		DHD_IF_ROLE_NAN(pub, idx))
 #endif /* DHD_AWDL */
+
+#define DHD_FLOW_RING_INV_ID(dhdp, flowid) \
+	(flowid < FLOWID_RESERVED) || (flowid > (dhdp)->max_tx_flowid)
 
 #define DHD_FLOW_RING(dhdp, flowid) \
 	(flow_ring_node_t *)&(((flow_ring_node_t *)((dhdp)->flow_ring_table))[flowid])
